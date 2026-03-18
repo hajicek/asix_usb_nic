@@ -521,7 +521,6 @@ static struct _ax_ptp_info *ax_ptp_info_transform(struct ax_device *axdev,
 #ifdef ENABLE_PTP_DEBUG
 	printk("%s\n", __func__);
 #endif
-#ifndef ENABLE_AX88279A_PTP
 	struct _ax_ptp_info temp[AX_PTP_HW_QUEUE_SIZE] = {0};
 	int i;
 
@@ -530,22 +529,23 @@ static struct _ax_ptp_info *ax_ptp_info_transform(struct ax_device *axdev,
 	{
 		struct _179a_ptp_info *_179a_ptp = (typeof(_179a_ptp))data;
 
-		for (i = 0; i < AX_PTP_HW_QUEUE_SIZE; i++) {
-			memcpy(&temp[i], &_179a_ptp[i], 2);
-			temp[i].sequence_id &= 0xFF;
-			temp[i].nsec = _179a_ptp[i].nsec;
-			temp[i].sec_l = _179a_ptp[i].sec_l;
-			temp[i].sec_h = _179a_ptp[i].sec_h;
+		for (i = 0; i < AX_PTP_HW_QUEUE_SIZE_179A; i++) {
+			temp[i].nsec        = _179a_ptp[i].nsec;
+			temp[i].sec_l       = _179a_ptp[i].sec_l;
+			temp[i].sec_h       = _179a_ptp[i].sec_h;
+			temp[i].sequence_id = _179a_ptp[i].sequence_id;
+			temp[i].msg_type    = _179a_ptp[i].msg_type;
+			temp[i].status      = _179a_ptp[i].status;
 		}
-		memcpy(data, temp, AX_PTP_INFO_SIZE);
+		memcpy(data, temp, AX_PTP_INFO_SIZE * AX_PTP_HW_QUEUE_SIZE_179A);
 		break;
 	}
-	};
+	default:
+		/* AX88279/AX88279A firmware returns _ax_ptp_info directly */
+		break;
+	}
 
 	return (struct _ax_ptp_info *)data;
-#else
-	return NULL;
-#endif
 }
 
 
@@ -576,7 +576,7 @@ static void ax_ptp_ts_callback(struct urb *urb)
 		goto free;
 	}
 
-	for (i = 0; i < AX_PTP_HW_QUEUE_SIZE; i++) {
+	for (i = 0; i < AX_PTP_HW_QUEUE_SIZE_179A; i++) {
 		if (temp_ptp_info[i].status) {
 			ptp_cfg->tx_ptp_info[ptp_cfg->ptp_tail++] = temp_ptp_info[i];
 			if (ptp_cfg->ptp_tail == AX_PTP_QUEUE_SIZE)
@@ -619,7 +619,7 @@ int ax_ptp_ts_read_cmd_async(struct ax_device *axdev)
 	int status = 0;
 	struct urb *urb;
 	struct _ax_ptp_usb_info *info;
-	u16 size = AX_PTP_INFO_SIZE * AX_PTP_HW_QUEUE_SIZE;
+	u16 size = AX_179A_PTP_INFO_SEG_SIZE * AX_PTP_HW_QUEUE_SIZE_179A;
 #ifdef ENABLE_PTP_DEBUG
 	printk("%s\n", __func__);
 #endif
@@ -1341,6 +1341,7 @@ static void ax88279_read_ts_callback(struct urb *urb)
 				ptp_cfg->ptp_tail = 0;
 			ptp_cfg->num_items++;
 
+#ifdef ENABLE_AX88279A_PTP
 			if (temp_ptp_info[i].usr_id) {
 #ifdef ENABLE_NORMAL_PKT_PTP_DEBUG_NORMAL
 				printk("### status: %d", temp_ptp_info[i].status);
@@ -1353,23 +1354,30 @@ static void ax88279_read_ts_callback(struct urb *urb)
 				printk("### ----------------------------###\n");
 #endif
 			} else {
+#endif
 				printk("*****ptp packet*****\n");
 #ifdef ENABLE_NORMAL_PKT_PTP_DEBUG_PTP
 				printk("### status: %d", temp_ptp_info[i].status);
+#ifdef ENABLE_AX88279A_PTP
 				printk("### tx_ts: %d", temp_ptp_info[i].tx_ts);
 				printk("### usr_id: %d", temp_ptp_info[i].usr_id);
+#endif
 				printk("### type: 0x%02x", temp_ptp_info[i].msg_type);
 				printk("### s_id: 0x%04x", temp_ptp_info[i].sequence_id);
 				printk("### nsec: 0x%08x", temp_ptp_info[i].nsec);
 				printk("###  sec: 0x%04x%08x", temp_ptp_info[i].sec_h, temp_ptp_info[i].sec_l);
 				printk("### ----------------------------###\n");
 #endif
+#ifdef ENABLE_AX88279A_PTP
 			}
+#endif
 
 		}
 	}
 
+#ifdef ENABLE_AX88279A_PTP
 	if (temp_ptp_info[i].usr_id == 0)
+#endif
 	ax_tx_timestamp(axdev);
 out:
 	ax88279_submit_ts(axdev);
